@@ -1,6 +1,10 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from typing import List
+
+from database import create_document, db
+from schemas import ContactMessage
 
 app = FastAPI()
 
@@ -34,17 +38,17 @@ def test_database():
     
     try:
         # Try to import database module
-        from database import db
+        from database import db as _db
         
-        if db is not None:
+        if _db is not None:
             response["database"] = "✅ Available"
             response["database_url"] = "✅ Configured"
-            response["database_name"] = db.name if hasattr(db, 'name') else "✅ Connected"
+            response["database_name"] = _db.name if hasattr(_db, 'name') else "✅ Connected"
             response["connection_status"] = "Connected"
             
             # Try to list collections to verify connectivity
             try:
-                collections = db.list_collection_names()
+                collections = _db.list_collection_names()
                 response["collections"] = collections[:10]  # Show first 10 collections
                 response["database"] = "✅ Connected & Working"
             except Exception as e:
@@ -58,11 +62,37 @@ def test_database():
         response["database"] = f"❌ Error: {str(e)[:50]}"
     
     # Check environment variables
-    import os
     response["database_url"] = "✅ Set" if os.getenv("DATABASE_URL") else "❌ Not Set"
     response["database_name"] = "✅ Set" if os.getenv("DATABASE_NAME") else "❌ Not Set"
     
     return response
+
+# --------------------------
+# Contact Form Endpoints
+# --------------------------
+
+@app.post("/api/contact")
+def submit_contact(payload: ContactMessage):
+    try:
+        doc_id = create_document("contactmessage", payload)
+        return {"ok": True, "id": doc_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/contact")
+def list_contacts(limit: int = Query(20, ge=1, le=100)):
+    if db is None:
+        raise HTTPException(status_code=500, detail="Database not configured")
+    try:
+        # Sort by created_at desc if field exists
+        cursor = db["contactmessage"].find({}).sort("created_at", -1).limit(limit)
+        results = []
+        for doc in cursor:
+            doc["id"] = str(doc.pop("_id"))
+            results.append(doc)
+        return {"ok": True, "items": results}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
